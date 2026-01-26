@@ -1,0 +1,13 @@
+# Ignorar pastas de compilação do PyInstaller
+build/
+dist/
+*.spec
+ENTREGA_FINAL/
+
+# Ignorar arquivos temporários do Python
+__pycache__/
+*.pyc
+
+# Ignorar logs locais e arquivos de sistema
+historico_log.csv
+.DS_Store
