@@ -1,29 +1,49 @@
 # 🚀 MoveIT - AD Automation Tool
 
-Ferramenta de automação desenvolvida para agilizar a movimentação de ativos (computadores) entre Unidades Organizacionais (OUs) no Active Directory.
+![Python]
+![Flet]
+![PowerShell]
+![Platform]
+![Status]
 
-Desenvolvido para uso interno no setor de TI, substituindo processos manuais repetitivos por uma interface gráfica ágil e amigável.*
+> **Enterprise tool for mass migration and organization of Active Directory assets.**
 
-## 🛠️ Tecnologias Utilizadas
-
-* **Python 3.10+**
-* **Flet** (Interface Gráfica Flutter para Python)
-* **PowerShell** (Integração com Active Directory via `Move-ADObject`)
-* **Threading** (Processamento assíncrono para não travar a UI)
-* **PyInstaller** (Compilação para executável standalone)
-
-## ✨ Funcionalidades
-
-* **Paste & Go:** Entrada de dados flexível (aceita listas do Excel, CSV ou texto bruto).
-* **Sanitização Automática:** Limpeza de caracteres inválidos nos hostnames.
-* **Interface Responsiva:** Barra de progresso e logs em tempo real sem travamentos.
-* **Log de Auditoria:** Geração automática de histórico (`historico_log.csv`).
-* **Configurável:** Destinos (OUs) mapeados via arquivo JSON externo.
-
-## ⚠️ Requisitos
-
-* Para a movimentação funcionar, a máquina deve ter o **RSAT (Active Directory module for Windows PowerShell)** instalado.
-* O usuário deve ter permissões administrativas no AD.
+**MoveIT** is a Desktop solution designed to streamline IT and Service Desk workflows. It provides a modern graphical interface to execute complex AD object movements, ensuring security, data validation, and audit logging.
 
 ---
-*Desenvolvido por George GS Matos*
+
+## ✨ Key Features
+
+* **Modern GUI:** Built with **Flet** (Python), featuring a native Dark Mode interface.
+* **Batch Processing:** Move hundreds of computers simultaneously by simply pasting a list of hostnames.
+* **Backend Security:** Utilizes native PowerShell commands (`Move-ADObject`) with pre-execution validation (`Get-ADComputer`).
+* **Non-Blocking Execution:** Processing runs on separate **Threads**, keeping the interface responsive at all times.
+* **Audit Logs:** Automatically generates a `.csv` log file with the status (Success/Error) and timestamp for every operation.
+* **Data Sanitization:** Automatic cleanup of extra spaces and invalid characters in hostnames.
+
+---
+
+## ⚙️ Prerequisites
+
+To run the software (either source code or executable), the environment must meet the following requirements:
+
+1.  **Operating System:** Windows 10/11 or Windows Server.
+2.  **Permissions:** The logged-in user must have **write permissions** on the target Active Directory OUs.
+3.  **RSAT Installed:** Remote Server Administration Tools (Active Directory PowerShell Module) must be enabled.
+
+---
+
+## 🚀 Configuration
+
+The system uses a JSON file to map available destinations (OUs).
+
+1.  In the root folder, create or edit the `config.json` file.
+2.  Follow the format below (Key = Display Name, Value = LDAP Path):
+
+```json
+{
+    "Computers - Finance": "OU=Finance,OU=Computers,DC=company,DC=com",
+    "Computers - HR": "OU=HR,OU=Computers,DC=company,DC=com",
+    "IT Lab": "OU=Lab,OU=IT,DC=company,DC=com",
+    "Decommissioned": "OU=Disabled Users,DC=company,DC=com"
+}

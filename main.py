@@ -6,226 +6,400 @@ import threading
 import time
 import re
 
-CONFIG_PATH = "config.json"
+# =============================================================================
+# 1. GLOBAL CONFIGURATION & CONSTANTS
+# =============================================================================
+
+ARQUIVO_CONFIG = "config.json"
+ARQUIVO_LOG = "historico_log.csv"
+
+# Control flag for thread interruption
 cancelar_processo = False
 
-def main(page: ft.Page):
-    page.title = "MoveIT"
-    page.theme_mode = ft.ThemeMode.DARK
-    page.window_width = 750
-    page.window_height = 600
-    page.padding = 20
-    page.vertical_alignment = ft.MainAxisAlignment.START
+# =============================================================================
+# 2. BACKEND LOGIC (Helper Functions)
+# =============================================================================
 
-    # --- Carregar Config ---
+def carregar_configuracoes():
+    """
+    Reads the JSON file containing the Organizational Unit (OU) mappings.
+    Returns:
+        dict: Target OUs or an error message.
+    """
+    try:
+        with open(ARQUIVO_CONFIG, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"CRITICAL ERROR: Please create config.json": ""}
+    except json.JSONDecodeError:
+        return {"ERROR: Malformed config.json file": ""}
+
+def limpar_hostname(nome):
+    """
+    Sanitizes the hostname string: removes special chars, spaces, 
+    and converts to Uppercase.
+    Example: ' pc-01, ' -> 'PC-01'
+    """
+    return re.sub(r'[^a-zA-Z0-9-]', '', nome).upper()
+
+def registrar_log(dados_linha):
+    """
+    Appends the operation result to the local CSV log file.
+    """
+    try:
+        with open(ARQUIVO_LOG, "a", encoding='utf-8') as f:
+            for linha in dados_linha:
+                f.write(f"{linha}\n")
+    except Exception as e:
+        print(f"Error saving log: {e}")
+
+def executar_powershell(hostname, target_path):
+    """
+    Builds and executes the PowerShell script to move the AD object.
+    
+    Args:
+        hostname (str): The computer name.
+        target_path (str): The LDAP Distinguished Name (DN) of the target OU.
+        
+    Returns:
+        str: Script stdout or caught error message.
+    """
+    # Encapsulated PowerShell script with Try/Catch block for error handling
+    script_ps = f"""
+    try {{
+        $pc = Get-ADComputer -Identity '{hostname}' -ErrorAction Stop
+        Move-ADObject -Identity $pc -TargetPath '{target_path}'
+        Write-Host 'SUCESSO'
+    }} catch {{
+        Write-Host "ERRO: $_"
+    }}
+    """
+
+    # Configuration to hide the console window (Windows specific)
+    info_startup = subprocess.STARTUPINFO()
+    info_startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
     try:
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            destinos = json.load(f)
-    except FileNotFoundError:
-        destinos = {"Erro": "Crie o arquivo config.json"}
-
-    # --- Elementos da UI ---
-    
-    # 1. Dropdown
-    dd_destino = ft.Dropdown(
-        label="Selecione o Destino",
-        hint_text="Para onde os computadores vão?",
-        options=[ft.dropdown.Option(text=nome, key=path) for nome, path in destinos.items()],
-        width=710,
-        border_radius=10,
-        content_padding=15
-    )
-
-    # 2. Input
-    txt_input = ft.TextField(
-        label="Lista de Ativos",
-        hint_text="Insira aqui...",
-        multiline=True,
-        min_lines=1,
-        max_lines=10,
-        width=710,
-        border_radius=10
-    )
-
-    # 3. Barra de Progresso
-    progress_bar = ft.ProgressBar(width=710, color="blue", bgcolor="#222222", value=0, visible=False)
-    lbl_progress = ft.Text("", visible=False, weight="bold")
-
-    # 4. Log
-    txt_log = ft.Column(
-        controls=[ft.Text("Aguardando início do processamento...", color="grey", italic=True)], 
-        scroll=ft.ScrollMode.AUTO, 
-        height=180
-    )
-    
-    container_log = ft.Container(
-        content=txt_log, 
-        bgcolor=ft.colors.BLACK54, 
-        padding=15, 
-        border_radius=10,
-        border=ft.border.all(1, ft.colors.GREY_800),
-        width=710
-    )
-
-    # --- Lógica ---
-
-    def limpar_nome(nome):
-        return re.sub(r'[^a-zA-Z0-9-]', '', nome).upper()
-
-    def mover_no_ad(nome_pc, target_path):
-        ps_command = f"""
-        try {{
-            $pc = Get-ADComputer -Identity '{nome_pc}' -ErrorAction Stop
-            Move-ADObject -Identity $pc -TargetPath '{target_path}'
-            Write-Host 'SUCESSO'
-        }} catch {{
-            Write-Host "ERRO: $_"
-        }}
-        """
-        result = subprocess.run(
-            ["powershell", "-Command", ps_command],
-            capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW
+        resultado = subprocess.run(
+            ["powershell", "-Command", script_ps],
+            capture_output=True,
+            text=True,
+            startupinfo=info_startup
         )
-        return result.stdout.strip()
+        return resultado.stdout.strip()
+    except Exception as e:
+        return f"SYSTEM ERROR: {str(e)}"
 
-    def thread_processamento(target_ou, texto_bruto):
-        global cancelar_processo
+# =============================================================================
+# 3. FLET APPLICATION (Frontend & Controller)
+# =============================================================================
+
+def main(page: ft.Page):
+    
+    # --- Window Configuration ---
+    page.title = "MoveIT - AD Automation"
+    page.theme_mode = ft.ThemeMode.DARK
+    page.window_width = 700
+    page.window_height = 750
+    page.padding = 25
+    page.vertical_alignment = ft.MainAxisAlignment.START
+
+    # Load initial configuration data
+    destinos_ad = carregar_configuracoes()
+
+    # -------------------------------------------------------------------------
+    # UI COMPONENTS
+    # -------------------------------------------------------------------------
+
+    # App Header
+    lbl_titulo = ft.Text(
+        value="MoveIT - AD Automation",
+        size=28,
+        weight=ft.FontWeight.BOLD,
+        color="white"
+    )
+    
+    lbl_subtitulo = ft.Text(
+        value="Ferramenta de Migração e Organização de Ativos",
+        size=14,
+        color="grey"
+    )
+
+    # Input: Destination Selection (Dropdown)
+    dd_destino = ft.Dropdown(
+        label="Destino (OU)",
+        hint_text="Selecione a Unidade Organizacional de destino...",
+        options=[
+            ft.dropdown.Option(text=k, key=v) for k, v in destinos_ad.items()
+        ],
+        width=700,
+        border_radius=8,
+        content_padding=15,
+        text_size=15
+    )
+
+    # Input: Hostname List (TextArea)
+    txt_input = ft.TextField(
+        label="Lista de Hostnames",
+        hint_text="Cole a lista aqui (Um por linha, ou separados por vírgula)...",
+        multiline=True,
+        min_lines=6,
+        max_lines=8,
+        width=700,
+        border_radius=8,
+        text_size=14
+    )
+
+    # Progress Indicators
+    barra_progresso = ft.ProgressBar(
+        width=700,
+        color="blue",
+        bgcolor="#222222",
+        value=0,
+        visible=False
+    )
+    
+    lbl_status_progresso = ft.Text(
+        value="",
+        visible=False,
+        weight=ft.FontWeight.BOLD,
+        size=14
+    )
+
+    # Log Console (Real-time feedback)
+    coluna_logs = ft.Column(
+        controls=[
+            ft.Text("Aguardando comando...", color="grey", italic=True)
+        ],
+        scroll=ft.ScrollMode.AUTO,
+        auto_scroll=True,
+    )
+    
+    container_logs = ft.Container(
+        content=coluna_logs,
+        height=200,
+        width=700,
+        bgcolor="#111111",
+        padding=15,
+        border_radius=10,
+        border=ft.border.all(1, "#333333")
+    )
+
+    # -------------------------------------------------------------------------
+    # UI UPDATE FUNCTIONS (Async)
+    # -------------------------------------------------------------------------
+
+    async def ui_iniciar_tarefa(total_items):
+        """Prepares the UI for the start of the process."""
+        barra_progresso.visible = True
+        barra_progresso.value = 0
+        lbl_status_progresso.visible = True
         
-        tokens = re.split(r'[,\n;\s]+', texto_bruto)
-        lista_pcs = [limpar_nome(t) for t in tokens if t.strip()]
+        coluna_logs.controls.clear()
         
-        total = len(lista_pcs)
-        count_sucesso = 0
-        log_para_arquivo = []
-
-        page.run_task(atualizar_ui_inicio, total)
-
-        if total == 0:
-            page.run_task(adicionar_log, "⚠️ Nenhum computador válido identificado.", "yellow")
-            page.run_task(atualizar_ui_fim, 0, 0)
-            return
-
-        for i, nome_pc in enumerate(lista_pcs):
-            if cancelar_processo:
-                page.run_task(adicionar_log, "🛑 Processo cancelado pelo usuário.", "red")
-                log_para_arquivo.append(f"CANCELADO,,{datetime.datetime.now()}")
-                break
-
-            progresso = (i) / total
-            page.run_task(atualizar_progresso, progresso, f"Processando {i+1} de {total}: {nome_pc}...")
-
-            resultado = mover_no_ad(nome_pc, target_ou)
-
-            if "SUCESSO" in resultado:
-                count_sucesso += 1
-                page.run_task(adicionar_log, f"✅ {nome_pc}: Movido!", "green")
-                log_para_arquivo.append(f"{nome_pc},Sucesso,{datetime.datetime.now()}")
-            else:
-                erro_msg = resultado.replace("ERRO:", "").strip()
-                if "cannot find an object" in erro_msg: erro_msg = "PC não encontrado"
-                page.run_task(adicionar_log, f"❌ {nome_pc}: {erro_msg}", "red")
-                log_para_arquivo.append(f"{nome_pc},Erro: {erro_msg},{datetime.datetime.now()}")
-            
-            time.sleep(0.1)
-
-        salvar_log_arquivo(log_para_arquivo)
-        page.run_task(atualizar_ui_fim, count_sucesso, total)
-
-    # --- Atualização de UI ---
-
-    async def atualizar_ui_inicio(total):
-        txt_log.controls.clear()
-        progress_bar.visible = True
-        progress_bar.value = 0
-        lbl_progress.visible = True
-        btn_processar.disabled = True
-        btn_cancelar.disabled = False
+        # Lock inputs
         txt_input.disabled = True
         dd_destino.disabled = True
+        btn_processar.disabled = True
+        btn_cancelar.disabled = False
+        
         page.update()
 
-    async def atualizar_progresso(valor, texto):
-        progress_bar.value = valor
-        lbl_progress.value = texto
+    async def ui_atualizar_progresso(valor, texto):
+        """Updates the progress bar."""
+        barra_progresso.value = valor
+        lbl_status_progresso.value = texto
         page.update()
 
-    async def adicionar_log(texto, cor):
-        txt_log.controls.append(ft.Text(texto, color=cor, size=13, font_family="Consolas"))
+    async def ui_adicionar_log(mensagem, cor_texto):
+        """Appends a new line to the virtual console."""
+        coluna_logs.controls.append(
+            ft.Text(
+                value=mensagem,
+                color=cor_texto,
+                font_family="Consolas",
+                size=13
+            )
+        )
         page.update()
 
-    async def atualizar_ui_fim(sucesso, total):
-        progress_bar.value = 1 if total > 0 else 0
-        progress_bar.color = "green"
-        lbl_progress.value = f"Concluído: {sucesso} de {total} ativos movidos."
-        btn_processar.disabled = False
-        btn_cancelar.disabled = True
+    async def ui_finalizar_tarefa(sucesso, total):
+        """Restores the UI state."""
+        barra_progresso.value = 1 if total > 0 else 0
+        barra_progresso.color = "green"
+        
+        lbl_status_progresso.value = (
+            f"Processo finalizado: {sucesso}/{total} máquinas movidas."
+        )
+        
+        # Unlock inputs
         txt_input.disabled = False
         dd_destino.disabled = False
+        btn_processar.disabled = False
+        btn_cancelar.disabled = True
+        
         page.update()
 
-    def salvar_log_arquivo(dados):
-        try:
-            with open("historico_log.csv", "a", encoding='utf-8') as f:
-                for linha in dados:
-                    f.write(f"{linha}\n")
-        except: pass
+    # -------------------------------------------------------------------------
+    # WORKER THREAD
+    # -------------------------------------------------------------------------
 
-    # --- Botões ---
-
-    def clique_processar(e):
+    def thread_processamento(caminho_ou, texto_bruto):
         global cancelar_processo
-        if not dd_destino.value or not txt_input.value:
-            return
-        cancelar_processo = False
-        threading.Thread(target=thread_processamento, args=(dd_destino.value, txt_input.value), daemon=True).start()
+        
+        # 1. Input Processing
+        tokens = re.split(r'[,\n;\s]+', texto_bruto)
+        lista_maquinas = [limpar_hostname(t) for t in tokens if t.strip()]
+        
+        total = len(lista_maquinas)
+        cont_sucesso = 0
+        buffer_csv = []
 
-    def clique_cancelar(e):
+        # Update initial UI
+        page.run_task(ui_iniciar_tarefa, total)
+
+        # Validate empty list
+        if total == 0:
+            page.run_task(ui_adicionar_log, "⚠️ A lista está vazia.", "yellow")
+            page.run_task(ui_finalizar_tarefa, 0, 0)
+            return
+
+        # 2. Execution Loop
+        for i, hostname in enumerate(lista_maquinas):
+            
+            if cancelar_processo:
+                page.run_task(ui_adicionar_log, "🛑 Operação interrompida.", "red")
+                buffer_csv.append(f"CANCELLED_BY_USER,,{datetime.datetime.now()}")
+                break
+
+            progresso_atual = i / total
+            page.run_task(
+                ui_atualizar_progresso, 
+                progresso_atual, 
+                f"Processando {i+1} de {total}: {hostname}..."
+            )
+
+            # Execute AD Action
+            resultado = executar_powershell(hostname, caminho_ou)
+            timestamp = datetime.datetime.now()
+            
+            if "SUCESSO" in resultado:
+                cont_sucesso += 1
+                page.run_task(ui_adicionar_log, f"✅ {hostname} -> Movido", "green")
+                buffer_csv.append(f"{hostname},Success,{timestamp}")
+            else:
+                msg_erro = resultado.replace("ERRO:", "").strip()
+                if "cannot find an object" in msg_erro:
+                    msg_erro = "Hostname not found in AD"
+                
+                page.run_task(ui_adicionar_log, f"❌ {hostname}: {msg_erro}", "red")
+                buffer_csv.append(f"{hostname},Error: {msg_erro},{timestamp}")
+
+            time.sleep(0.1)
+
+        # 3. Finalization
+        registrar_log(buffer_csv)
+        page.run_task(ui_finalizar_tarefa, cont_sucesso, total)
+
+    # -------------------------------------------------------------------------
+    # EVENT HANDLERS
+    # -------------------------------------------------------------------------
+
+    def ao_clicar_processar(e):
+        global cancelar_processo
+        
+        if not dd_destino.value:
+            coluna_logs.controls.append(ft.Text("⚠️ Selecione um destino primeiro!", color="yellow"))
+            page.update()
+            return
+            
+        if not txt_input.value:
+            coluna_logs.controls.append(ft.Text("⚠️ Insira os hostnames!", color="yellow"))
+            page.update()
+            return
+
+        cancelar_processo = False
+        
+        threading.Thread(
+            target=thread_processamento,
+            args=(dd_destino.value, txt_input.value),
+            daemon=True
+        ).start()
+
+    def ao_clicar_cancelar(e):
         global cancelar_processo
         cancelar_processo = True
         btn_cancelar.disabled = True
         page.update()
 
+    # -------------------------------------------------------------------------
+    # ACTION BUTTONS
+    # -------------------------------------------------------------------------
+
     btn_processar = ft.ElevatedButton(
-        text="PROCESSAR",
-        icon=ft.icons.PLAY_ARROW,
-        on_click=clique_processar,
-        style=ft.ButtonStyle(
-            bgcolor=ft.colors.GREEN_700, 
-            color=ft.colors.WHITE,
-            shape=ft.RoundedRectangleBorder(radius=8)
+        content=ft.Text(
+            value="INICIAR MIGRAÇÃO",
+            size=14,
+            weight=ft.FontWeight.BOLD
         ),
-        height=45,
-        width=200
+        style=ft.ButtonStyle(
+            bgcolor="green",
+            color="white",
+            shape=ft.RoundedRectangleBorder(radius=8),
+        ),
+        width=200,
+        height=50,
+        on_click=ao_clicar_processar
     )
 
     btn_cancelar = ft.ElevatedButton(
-        text="CANCELAR",
-        icon=ft.icons.CANCEL,
-        on_click=clique_cancelar,
-        style=ft.ButtonStyle(
-            bgcolor=ft.colors.RED_700, 
-            color=ft.colors.WHITE,
-            shape=ft.RoundedRectangleBorder(radius=8)
+        content=ft.Text(
+            value="CANCELAR",
+            size=14,
+            weight=ft.FontWeight.BOLD
         ),
-        disabled=True,
+        style=ft.ButtonStyle(
+            bgcolor="red",
+            color="white",
+            shape=ft.RoundedRectangleBorder(radius=8),
+        ),
+        width=200,
         height=45,
-        width=200
+        disabled=True,
+        on_click=ao_clicar_cancelar
     )
 
-    # --- Layout ---
+    # -------------------------------------------------------------------------
+    # FINAL LAYOUT ASSEMBLY
+    # -------------------------------------------------------------------------
     
     page.add(
-        ft.Text("MoveIT", size=26, weight="bold", color="white"),
-        ft.Text("Insira o patrimônio dos ativos abaixo (separados por vírgula ou linha):", size=12, color="grey"),
-        txt_input,
-        dd_destino,
-        ft.Container(height=10),
-        ft.Row([btn_processar, btn_cancelar], alignment=ft.MainAxisAlignment.CENTER, spacing=20),
-        ft.Container(height=10),
-        lbl_progress,
-        progress_bar,
-        container_log
+        ft.Column(
+            controls=[
+                lbl_titulo,
+                lbl_subtitulo,
+                ft.Container(height=15),
+                
+                txt_input,
+                dd_destino,
+                
+                ft.Container(height=20),
+                
+                ft.Row(
+                    controls=[btn_processar, btn_cancelar],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    spacing=20
+                ),
+                
+                ft.Container(height=20),
+                
+                lbl_status_progresso,
+                barra_progresso,
+                container_logs
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER
+        )
     )
 
-ft.app(target=main)
+if __name__ == "__main__":
+    ft.app(target=main)
