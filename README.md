@@ -1,7 +1,6 @@
 # 🚀 MoveIT - AD Automation & Telemetry Tool
 
-![Capa do Projeto](cover.png)
-*(Adicione aqui uma imagem de capa bem bonita)*
+![alt text](image.png)
 
 ---
 
