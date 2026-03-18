@@ -1,0 +1,44 @@
+# ========================
+# 🔒 SECURITY & DATA
+# ========================
+# Ignore local configuration with sensitive data
+config.json
+
+# Ignore operation logs and history
+historico_log.csv
+*.log
+
+# ========================
+# 🐍 PYTHON CORE
+# ========================
+# Compiled bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ========================
+# 🛠️ BUILD & DEPLOY
+# ========================
+# PyInstaller/Flet generated folders
+build/
+dist/
+*.spec
+
+# Final release folder (MoveIT)
+ENTREGA_FINAL/
+MoveIT/
+
+# Distribution packages
+MoveIT.zip
+
+# ========================
+# 💻 IDE & SYSTEM
+# ========================
+# VS Code / PyCharm settings
+.vscode/
+.idea/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini

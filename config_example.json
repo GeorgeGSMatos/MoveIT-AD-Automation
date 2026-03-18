@@ -1,0 +1,4 @@
+{
+    "Financeiro": "OU=Financeiro,DC=empresa,DC=com",
+    "RH": "OU=RH,DC=empresa,DC=com"
+}
